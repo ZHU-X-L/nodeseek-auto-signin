@@ -8,16 +8,24 @@ on:
     # 每天北京时间 12:20 (UTC 4:20)
     - cron: '20 4 * * *'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: nodeseek-daily
+  cancel-in-progress: false
+
 jobs:
   run-nodeseek-daily:
     runs-on: ubuntu-22.04
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -49,11 +57,31 @@ jobs:
         env:
           NS_COOKIE: ${{ secrets.NS_COOKIE }}
           NS_RANDOM: ${{ secrets.NS_RANDOM }}
+          NS_COMMENT: "false"
           NS_COMMENT_URL: ${{ secrets.NS_COMMENT_URL }}
           NS_DELAY_MIN: ${{ vars.NS_DELAY_MIN }}
           NS_DELAY_MAX: ${{ vars.NS_DELAY_MAX }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
           HEADLESS: "false"
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python nodeseek_daily.py
+
+      - name: Keep repository active
+        if: always()
+        run: |
+          LAST=$(git log -1 --format=%ct)
+          NOW=$(date +%s)
+          if [ "$(( (NOW - LAST) / 86400 ))" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            date -u > .github/keepalive.txt
+            git add .github/keepalive.txt
+            git commit -m "chore: keep scheduled workflow active [skip ci]"
+            git push
+          fi

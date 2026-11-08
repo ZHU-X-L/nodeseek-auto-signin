@@ -39,9 +39,9 @@ class Config:
         self.tg_bot_token = os.environ.get("TG_BOT_TOKEN")
         self.tg_chat_id = os.environ.get("TG_CHAT_ID")
         
-        # 评论功能开关（默认开启，设置 NS_COMMENT=false 可关闭）
+        # 评论功能默认关闭，只有明确设置 true 才开启
         ns_comment_env = os.environ.get("NS_COMMENT", "")
-        self.enable_comment = (ns_comment_env.lower() != "false") if ns_comment_env else True
+        self.enable_comment = ns_comment_env.lower() == "true"
         
         # 评论区域配置（处理空字符串）
         comment_url_env = os.environ.get("NS_COMMENT_URL", "") or ""
@@ -73,6 +73,42 @@ config = Config()
 
 # 随机评论内容
 randomInputStr = ["bd","绑定","帮顶","吃瓜吃瓜","好价","过来看一下","喝杯奶茶压压惊","咕噜咕噜","前排","悄悄地我来了悄悄地又走了","恭喜发财","好基","公道公道","楼主不错 绑定","还可以","再看看吧","楼下要了","挺不错的 bdbd","好价 好价","给楼下点个","祝早出","观望一下 早出","让给楼下","bd 可惜用不上 楼下来秒了","还要啥自行车","卷起来","就是这个feel","这是什么东西","吗喽~~~","收了吧楼下","bd一下","bd"]
+
+def send_notifications(message):
+    """通过 QQ 邮箱发送报告，Telegram 配置存在时额外发送。"""
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+
+    host = os.environ.get("SMTP_HOST", "smtp.qq.com")
+    port = int(os.environ.get("SMTP_PORT", "465"))
+    user = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASS")
+    recipient = os.environ.get("SMTP_TO") or user
+    email_sent = False
+    if user and password and recipient:
+        mail = EmailMessage()
+        mail["Subject"] = "NodeSeek 每日签到报告"
+        mail["From"] = user
+        mail["To"] = recipient
+        mail.set_content(BeautifulSoup(message, "html.parser").get_text())
+        try:
+            with smtplib.SMTP_SSL(host, port, timeout=30, context=ssl.create_default_context()) as server:
+                server.login(user, password)
+                server.send_message(mail)
+            print("QQ 邮件通知已提交 SMTP 服务器")
+            email_sent = True
+        except smtplib.SMTPAuthenticationError:
+            print("QQ 邮箱认证失败，请检查 SMTP 服务是否开启及 SMTP_PASS 授权码")
+        except Exception as exc:
+            print(f"QQ 邮件通知失败: {type(exc).__name__}")
+    else:
+        print("QQ 邮件配置不完整，请添加 SMTP_USER、SMTP_PASS 和 SMTP_TO")
+
+    if config.tg_bot_token and config.tg_chat_id:
+        send_telegram_message(message)
+    return email_sent
+
 
 def send_telegram_message(message):
     """
@@ -723,7 +759,7 @@ if __name__ == "__main__":
     print(f"当前配置: NS_RANDOM={config.ns_random}, HEADLESS={config.headless}")
     if config.account_count == 0:
         print("未配置 Cookie，退出")
-        send_telegram_message("❌ <b>NodeSeek 自动任务失败</b>\n\n未配置 NS_COOKIE 环境变量")
+        send_notifications("❌ <b>NodeSeek 自动任务失败</b>\n\n未配置 NS_COOKIE 环境变量")
         exit(1)
     
     print(f"检测到 {config.account_count} 个账号")
@@ -798,4 +834,7 @@ if __name__ == "__main__":
 \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 \ud83d\udd52 {beijing_time}"""
     
-    send_telegram_message(report_message)
+    notification_sent = send_notifications(report_message)
+    all_signed_in = all(r["sign_in"] in ("success", "already") and not r["error"] for r in all_results)
+    if not all_signed_in or not notification_sent:
+        exit(1)
